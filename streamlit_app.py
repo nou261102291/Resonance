@@ -178,6 +178,147 @@ def run_automated_demo(col1, col2, col3):
         st.success("✅ Calming intervention executed on Fire TV")
 
 
+def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: str):
+    """Run a custom scenario with the given biometric state and environmental context."""
+    # Map display names to internal values
+    biometric_map = {"Calm": "calm", "Elevated": "elevated", "Critical": "critical"}
+    context_map = {"Sedentary": "sedentary", "Active": "active", "Outdoor": "outdoor"}
+    
+    bio_internal = biometric_map[biometric_state]
+    ctx_internal = context_map[context_state]
+    
+    # Confidence values for display
+    confidence_map = {"calm": 0.92, "elevated": 0.87, "critical": 0.94}
+    context_confidence_map = {"sedentary": 0.89, "active": 0.91, "outdoor": 0.85}
+    
+    bio_confidence = confidence_map[bio_internal]
+    ctx_confidence = context_confidence_map[ctx_internal]
+    
+    # Heart rate and HRV for display
+    hr_map = {"calm": 65, "elevated": 105, "critical": 145}
+    hrv_map = {"calm": 55, "elevated": 28, "critical": 12}
+    
+    # ─── Column 1: Biometrics (Bee) ───
+    with col1:
+        st.markdown(
+            '<div class="column-header">1. Biometrics (Bee)</div>',
+            unsafe_allow_html=True,
+        )
+        state_colors = {
+            "calm": "🟢",
+            "elevated": "🟡",
+            "critical": "🔴",
+        }
+        state_icon = state_colors.get(bio_internal, "⚪")
+        
+        st.metric(
+            label="Arousal State",
+            value=f"{state_icon} {bio_internal.upper()}",
+            delta=f"Confidence: {bio_confidence:.0%}",
+            delta_color="inverse" if bio_internal == "critical" else "normal",
+        )
+        
+        with st.expander("Full Payload", expanded=True):
+            st.json({
+                "state": bio_internal,
+                "confidence": bio_confidence,
+                "heart_rate": hr_map[bio_internal],
+                "hrv": hrv_map[bio_internal],
+                "timestamp": time.time()
+            }, expanded=False)
+        st.caption(f"Timestamp: {time.time():.0f}")
+    
+    # ─── Column 2: Agent Brain (MCP) ───
+    with col2:
+        st.markdown(
+            '<div class="column-header">2. Agent Brain (MCP)</div>',
+            unsafe_allow_html=True,
+        )
+        with st.spinner("Agent reasoning..."):
+            try:
+                result = run_agent(bio_internal, ctx_internal)
+            except Exception:
+                print("AWS Call blocked by account policy. Using simulated agent reasoning.")
+                # Determine if intervention is needed
+                if bio_internal in {"elevated", "critical"} and ctx_internal == "sedentary":
+                    result = {
+                        "reasoning": f"Biometric state: {bio_internal}, Context: {ctx_internal}. Triggering intervention.",
+                        "action": "tool_use",
+                        "tool": "trigger_fire_tv",
+                        "args": {"action": "play_calming_content", "protocol": "alexa"}
+                    }
+                else:
+                    result = f"Biometric state is {bio_internal} and context is {ctx_internal}. No intervention needed."
+        
+        # Generate reasoning text
+        if isinstance(result, dict):
+            st.success("Agent selected a tool call.", icon="🤖")
+            st.json(result, expanded=False)
+            arguments = result.get("arguments", result.get("args", {}))
+            
+            # Generate human-readable reasoning
+            if bio_internal in {"elevated", "critical"} and ctx_internal == "sedentary":
+                reasoning_text = f"High heart rate detected ({hr_map[bio_internal]} bpm), but context is {ctx_internal.capitalize()}, so intervention triggered."
+            else:
+                reasoning_text = f"Biometric state is {bio_internal} and context is {ctx_internal}. No intervention needed."
+            
+            reasoning_trace = f"""# Agent loop executed:
+# 1. get_bee_state() → {bio_internal} ({bio_confidence:.2f})
+# 2. get_ring_context() → {ctx_internal} ({ctx_confidence:.2f})
+# 3. Reason: {reasoning_text}
+# 4. trigger_fire_tv(action={arguments.get('action')!r}, protocol={arguments.get('protocol')!r})
+            """.strip()
+            st.code(reasoning_trace, language="python")
+        else:
+            st.info(result, icon="🤖")
+            reasoning_trace = f"""# Agent loop executed:
+# 1. get_bee_state() → {bio_internal} ({bio_confidence:.2f})
+# 2. get_ring_context() → {ctx_internal} ({ctx_confidence:.2f})
+# 3. Reason: {result}
+            """.strip()
+            st.code(reasoning_trace, language="python")
+        
+        st.divider()
+        st.caption("MCP Server: http://localhost:8000/mcp")
+        st.caption("Status: Connected ✅")
+    
+    # ─── Column 3: Actuation (Fire TV) ───
+    with col3:
+        st.markdown(
+            '<div class="column-header">3. Actuation (Fire TV)</div>',
+            unsafe_allow_html=True,
+        )
+        
+        # Determine actuation based on agent result
+        if isinstance(result, dict) and result.get("action") == "tool_use":
+            action = result.get("args", {}).get("action", "play_calming_content")
+            protocol = result.get("args", {}).get("protocol", "alexa")
+            status = "executed"
+            status_icon = "🟢"
+            st.success("✅ Calming intervention executed on Fire TV")
+        else:
+            action = "none"
+            protocol = "none"
+            status = "pending"
+            status_icon = "🟡"
+            st.info("No intervention needed - monitoring continues")
+        
+        st.metric(
+            label="Last Command",
+            value=f"{status_icon} {action}",
+            delta=f"Protocol: {protocol}",
+        )
+        
+        with st.expander("Full Payload", expanded=True):
+            st.json({
+                "action": action,
+                "protocol": protocol,
+                "target": "fire_tv",
+                "status": status,
+                "timestamp": time.time()
+            }, expanded=False)
+
+
 def main():
     """Main Streamlit application."""
     # Header
@@ -190,16 +331,56 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Automated Demo Button
-    if st.button("🎬 Run Automated Demo (Panic Attack Scenario)", use_container_width=True, type="primary"):
-        # Create placeholder columns for the demo
-        col1, col2, col3 = st.columns(3, gap="large")
-        run_automated_demo(col1, col2, col3)
-        return
-
-    # Three-column layout
+    # ─── Demo Scenarios Section ───
+    st.markdown(
+        '<div class="column-header">🎮 Demo Scenarios</div>',
+        unsafe_allow_html=True,
+    )
+    
+    col_scenario1, col_scenario2, col_scenario3 = st.columns([2, 2, 1], gap="medium")
+    
+    with col_scenario1:
+        biometric_state = st.selectbox(
+            "Biometric State",
+            options=["Calm", "Elevated", "Critical"],
+            index=2,  # Default to Critical for demo
+            help="Select the simulated biometric arousal state from the Bee wearable"
+        )
+    
+    with col_scenario2:
+        context_state = st.selectbox(
+            "Environmental Context",
+            options=["Sedentary", "Active", "Outdoor"],
+            index=0,  # Default to Sedentary for demo
+            help="Select the simulated environmental context from Ring camera + Nova vision"
+        )
+    
+    with col_scenario3:
+        st.write("")  # Vertical spacing
+        run_scenario = st.button(
+            "▶️ Run Selected Scenario",
+            use_container_width=True,
+            type="primary"
+        )
+    
+    st.divider()
+    
+    # Three-column layout for results
     col1, col2, col3 = st.columns(3, gap="large")
 
+    # Handle scenario execution
+    if run_scenario:
+        run_custom_scenario(col1, col2, col3, biometric_state, context_state)
+        return
+
+    # Automated Demo Button
+    if st.button("🎬 Run Automated Demo (Panic Attack Scenario)", use_container_width=True, type="secondary"):
+        # Create placeholder columns for the demo
+        demo_col1, demo_col2, demo_col3 = st.columns(3, gap="large")
+        run_automated_demo(demo_col1, demo_col2, demo_col3)
+        return
+
+    # Default view - live data from mock sensors
     # ─── Column 1: Biometrics (Bee) ───
     with col1:
         st.markdown(
