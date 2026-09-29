@@ -7,7 +7,7 @@
 [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-orange.svg)](https://modelcontextprotocol.io)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.64+-red.svg)](https://streamlit.io)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock-yellow.svg)](https://aws.amazon.com/bedrock/)
-[![Tests](https://img.shields.io/badge/Tests-33%20passing-brightgreen.svg)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Tests-38%20passing-brightgreen.svg)](https://pytest.org)
 
 ---
 
@@ -140,7 +140,7 @@ pytest test_mcp.py -v        # 12 tests - MCP tool handlers (unit)
 pytest test_aws.py -v        # 5 tests  - AWS Bedrock integration (mocked)
 ```
 
-**Current Status**: 33 tests passing ✅
+**Current Status**: 38 tests passing ✅
 
 ---
 
@@ -209,6 +209,19 @@ Triggers Fire TV actuation.
   "status": "executed"
 }
 ```
+
+---
+
+## ☁️ AWS Deployment
+
+The repo now includes a deployable AWS setup for a live demo link:
+
+- **Exact service choice:** Amazon ECS on AWS Fargate behind an Application Load Balancer.
+- **Source control linkage:** AWS CodeConnections connected to the GitHub repo.
+- **Build and deploy:** AWS CodePipeline orchestrates AWS CodeBuild, Amazon ECR, and ECS deployment.
+- **Container layout:** one demo container runs both `mcp_server.py` and `streamlit_app.py`.
+
+See [deploy/README.md](deploy/README.md) for the deployment flow, required AWS resources, and the live demo architecture.
 
 ---
 
