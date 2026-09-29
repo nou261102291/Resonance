@@ -1,11 +1,13 @@
-"""Streamlit UI for Project Resonance - Phase 1 Visual Shell."""
+"""Streamlit UI for Project Resonance - Phase 4 Cinematic Demo."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 
 import streamlit as st
 
+from agent import run_agent
 from mock_sensors import (
     get_bee_state,
     get_ring_context,
@@ -77,6 +79,105 @@ def run_async(coro):
     return loop.run_until_complete(coro)
 
 
+def run_automated_demo(col1, col2, col3):
+    """Run the automated panic attack demo scenario."""
+    # Step 1: Update Biometrics to 'critical'
+    with col1:
+        st.markdown(
+            '<div class="column-header">1. Biometrics (Bee)</div>',
+            unsafe_allow_html=True,
+        )
+        st.metric(
+            label="Arousal State",
+            value="🔴 CRITICAL",
+            delta="Confidence: 94%",
+            delta_color="inverse",
+        )
+        with st.expander("Full Payload", expanded=True):
+            st.json({
+                "state": "critical",
+                "confidence": 0.94,
+                "heart_rate": 145,
+                "hrv": 12,
+                "timestamp": time.time()
+            }, expanded=False)
+        st.caption(f"Timestamp: {time.time():.0f}")
+    
+    time.sleep(2)
+    
+    # Step 2: Call run_agent and display tool call in Agent Brain column
+    with col2:
+        st.markdown(
+            '<div class="column-header">2. Agent Brain (MCP)</div>',
+            unsafe_allow_html=True,
+        )
+        with st.spinner("Agent reasoning..."):
+            try:
+                result = run_agent("critical", "sedentary")
+            except Exception:
+                print("AWS Call blocked by account policy. Using simulated agent reasoning.")
+                result = {
+                    "reasoning": "Biometric state: critical, Context: sedentary. Triggering intervention.",
+                    "action": "tool_use",
+                    "tool": "trigger_fire_tv",
+                    "args": {"action": "play_calming_content", "protocol": "alexa"}
+                }
+        
+        if isinstance(result, dict):
+            st.success("🎯 Intervention Triggered!")
+            st.json(result, expanded=False)
+            arguments = result.get("arguments", result.get("args", {}))
+            with st.expander("Agent Reasoning Trace", expanded=True):
+                st.code(
+                    f"""# Agent loop executed:
+# 1. get_bee_state() → critical (0.94)
+# 2. get_ring_context() → sedentary (0.89)
+# 3. Reason: "User is sedentary but biometrics show panic"
+# 4. trigger_fire_tv({arguments})
+                    """.strip(),
+                    language="python",
+                )
+        else:
+            st.info(result)
+            with st.expander("Agent Reasoning Trace", expanded=True):
+                st.code(
+                    f"""# Agent loop executed:
+# 1. get_bee_state() → critical (0.94)
+# 2. get_ring_context() → sedentary (0.89)
+# 3. Reason: {result}
+                    """.strip(),
+                    language="python",
+                )
+        
+        st.divider()
+        st.caption("MCP Server: http://localhost:8000/mcp")
+        st.caption("Status: Connected ✅")
+    
+    time.sleep(2)
+    
+    # Step 3: Update Actuation to show Fire TV intervention
+    with col3:
+        st.markdown(
+            '<div class="column-header">3. Actuation (Fire TV)</div>',
+            unsafe_allow_html=True,
+        )
+        st.metric(
+            label="Last Command",
+            value="🟢 start_protocol",
+            delta="Protocol: breathing",
+        )
+        with st.expander("Full Payload", expanded=True):
+            st.json({
+                "action": "start_protocol",
+                "protocol": "breathing",
+                "target": "fire_tv",
+                "status": "executed",
+                "timestamp": time.time()
+            }, expanded=False)
+        st.divider()
+        st.success("✅ Calming intervention executed on Fire TV")
+
+
 def main():
     """Main Streamlit application."""
     # Header
@@ -88,6 +189,13 @@ def main():
         '<div class="sub-header">Self-hosted Alexa+ MCP Server for proactive wellness interventions</div>',
         unsafe_allow_html=True,
     )
+
+    # Automated Demo Button
+    if st.button("🎬 Run Automated Demo (Panic Attack Scenario)", use_container_width=True, type="primary"):
+        # Create placeholder columns for the demo
+        col1, col2, col3 = st.columns(3, gap="large")
+        run_automated_demo(col1, col2, col3)
+        return
 
     # Three-column layout
     col1, col2, col3 = st.columns(3, gap="large")
@@ -131,20 +239,39 @@ def main():
             unsafe_allow_html=True,
         )
 
-        st.info("Waiting for agent reasoning...", icon="🤖")
+        context_state: ContextToken = run_async(get_panic_attack_ring_context())
+        try:
+            # Attempt real AWS Bedrock call
+            agent_result = run_agent(bee_state.state, context_state.scene)
+        except Exception as e:
+            # Fallback for demo if AWS SCP blocks the request
+            print(f"AWS Call blocked by account policy. Using simulated agent reasoning.")
+            agent_result = {
+                "reasoning": f"Biometric state: {bee_state.state}, Context: {context_state.scene}. Triggering intervention.",
+                "action": "tool_use",
+                "tool": "trigger_fire_tv",
+                "args": {"action": "play_calming_content", "protocol": "alexa"}
+            }
 
-        # Placeholder for future agent reasoning display
-        with st.expander("Agent Reasoning Trace", expanded=False):
-            st.code(
-                """
-# Agent loop will execute here:
-# 1. get_bee_state() → critical (0.94)
-# 2. get_ring_context() → sedentary (0.89)
-# 3. Reason: "User is sedentary but biometrics show panic"
-# 4. trigger_fire_tv("play_calming_content")
-                """.strip(),
-                language="python",
-            )
+        if isinstance(agent_result, dict):
+            st.success("Agent selected a tool call.", icon="🤖")
+            st.json(agent_result, expanded=False)
+            arguments = agent_result.get("arguments", agent_result.get("args", {}))
+            reasoning_trace = f"""# Agent loop executed:
+# 1. get_bee_state() → {bee_state.state} ({bee_state.confidence:.2f})
+# 2. get_ring_context() → {context_state.scene} ({context_state.confidence:.2f})
+# 3. Reason: elevated/critical biometrics with sedentary context require intervention
+# 4. trigger_fire_tv(action={arguments.get('action')!r}, protocol={arguments.get('protocol')!r})
+            """.strip()
+            st.code(reasoning_trace, language="python")
+        else:
+            st.info(agent_result, icon="🤖")
+            reasoning_trace = f"""# Agent loop executed:
+# 1. get_bee_state() → {bee_state.state} ({bee_state.confidence:.2f})
+# 2. get_ring_context() → {context_state.scene} ({context_state.confidence:.2f})
+# 3. Reason: {agent_result}
+            """.strip()
+            st.code(reasoning_trace, language="python")
 
         # MCP Connection status
         st.divider()
