@@ -147,6 +147,17 @@ app = FastAPI(
 app.mount("/mcp", mcp_app)
 
 
+@app.get("/")
+async def root() -> dict[str, str]:
+    """Root landing page for the deployed demo."""
+    return {
+        "status": "ok",
+        "service": "resonance-mcp",
+        "health": "/health",
+        "mcp": "/mcp",
+    }
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
