@@ -1,0 +1,2 @@
+[tool.vercel]
+entrypoint = "mcp_server:app"

@@ -45,3 +45,15 @@ For the public demo, the ALB targets port `8501` so the Streamlit app is the use
 - CodeBuild must run in privileged mode so Docker can build the image.
 - The ECS task execution role needs ECR pull and CloudWatch Logs permissions.
 - If you later split the app into two services, keep the Streamlit app public and the MCP server private.
+
+## Deploying the stack
+
+Use the CloudFormation template at [deploy/resonance-stack.yaml](resonance-stack.yaml) with these required parameters:
+
+- `VpcId`
+- `PublicSubnetIds`
+- `CodeConnectionArn`
+- `GitHubFullRepositoryId`
+- `GitHubBranchName`
+
+After the stack reaches `CREATE_COMPLETE`, check the `AlbUrl` output in CloudFormation to open the live demo.
