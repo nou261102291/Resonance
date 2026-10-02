@@ -1,4 +1,5 @@
-"""FastAPI + MCP Streamable HTTP Server for Project Resonance."""
+with open('mcp_server.py', 'w') as f:
+    f.write('''"""FastAPI + MCP Streamable HTTP Server for Project Resonance."""
 
 from __future__ import annotations
 
@@ -9,7 +10,6 @@ from fastapi import FastAPI
 from mcp.server import Server
 from mcp.types import (
     CallToolRequest,
-    CallToolRequestParams,
     CallToolResult,
     ListToolsRequest,
     ListToolsResult,
@@ -95,32 +95,20 @@ async def handle_trigger_fire_tv(arguments: dict[str, Any] | None = None) -> Cal
     )
 
 
-async def handle_call_tool(name: str | CallToolRequestParams, arguments: dict[str, Any] | None = None) -> CallToolResult:
-    """Handle tools/call request - dispatches to individual handlers.
-    
-    Accepts either:
-    - A string tool name and optional arguments dict (for MCP handler)
-    - A CallToolRequestParams object (for test compatibility)
-    """
-    # Handle test compatibility: if first arg is CallToolRequestParams, extract name and arguments
-    if isinstance(name, CallToolRequestParams):
-        params = name
-        tool_name = params.name
-        args = params.arguments or {}
-    else:
-        tool_name = name
-        args = arguments or {}
+async def handle_call_tool(name: str, arguments: dict[str, Any] | None = None) -> CallToolResult:
+    """Handle tools/call request - dispatches to individual handlers."""
+    args = arguments or {}
 
-    if tool_name == "get_bee_state":
+    if name == "get_bee_state":
         return await handle_get_bee_state()
 
-    if tool_name == "get_ring_context":
+    if name == "get_ring_context":
         return await handle_get_ring_context()
 
-    if tool_name == "trigger_fire_tv":
-        return await handle_trigger_fire_tv(args)
+    if name == "trigger_fire_tv":
+        return await handle_trigger_fire_tv(arguments)
 
-    raise ValueError(f"Unknown tool: {tool_name}")
+    raise ValueError(f"Unknown tool: {name}")
 
 
 # MCP request handlers using MCP 1.x add_request_handler API
@@ -187,3 +175,5 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+''')
+print('File written successfully')
