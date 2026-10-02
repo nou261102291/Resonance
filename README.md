@@ -21,7 +21,7 @@ Project Resonance is a **self-hosted MCP (Model Context Protocol) server** that 
 | **Environmental Context** | Ring Camera + Amazon Nova | Vision classification: `sedentary` \| `active` \| `outdoor` \| `unknown` |
 | **Actuation** | Fire TV | Play calming content, adjust ambient lighting |
 
-**Core Innovation**: Zero-knowledge architecture — raw biometric data never leaves the edge. Only classified tokens (`ArousalStateToken`, `ContextToken`) flow through the MCP server to the reasoning agent.
+**Core Innovation**: Zero-knowledge architecture; raw biometric data never leaves the edge. Only classified tokens (`ArousalStateToken`, `ContextToken`) flow through the MCP server to the reasoning agent.
 
 ---
 
@@ -71,7 +71,7 @@ Project Resonance is a **self-hosted MCP (Model Context Protocol) server** that 
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/resonance.git
+git clone https://github.com/nou261102291/Resonance.git
 cd resonance
 
 # Create virtual environment
@@ -87,7 +87,7 @@ pip install -r requirements.txt
 ```txt
 fastapi==0.141.1
 uvicorn==0.54.0
-mcp==2.2.0
+mcp==1.11.0
 streamlit==1.64.0
 boto3==1.43.103
 pydantic==2.13.5
@@ -340,9 +340,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 📞 Contact
 
-- **Project Lead**: [Your Name](mailto:you@example.com)
-- **Issues**: [GitHub Issues](https://github.com/your-org/resonance/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/resonance/discussions)
+- **Project Lead**: nou261102291@noun.edu.ng
+- **Issues**: [GitHub Issues](https://github.com/nou261102291/Resonance/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/nou261102291/Resonance/discussions)
 
 ---
 

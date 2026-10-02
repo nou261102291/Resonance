@@ -124,12 +124,12 @@ async def handle_call_tool(name: str | CallToolRequestParams, arguments: dict[st
 
 
 # MCP request handlers using MCP 1.x add_request_handler API
-async def handle_list_tools(params: ListToolsRequest | None) -> ListToolsResult:
+async def handle_list_tools(ctx, params: ListToolsRequest) -> ListToolsResult:
     """Handle tools/list request."""
     return ListToolsResult(tools=TOOLS)
 
 
-async def handle_call_tool_request(params: CallToolRequest) -> CallToolResult:
+async def handle_call_tool_request(ctx, params: CallToolRequest) -> CallToolResult:
     """Handle tools/call request."""
     return await handle_call_tool(params.name, params.arguments)
 
@@ -139,7 +139,7 @@ mcp_server.add_request_handler("tools/list", ListToolsRequest, handle_list_tools
 mcp_server.add_request_handler("tools/call", CallToolRequest, handle_call_tool_request)
 
 
-# Create the MCP Streamable HTTP app (Starlette) - this handles lifespan internally
+# Create the MCP Streamable HTTP app (Starlette)
 mcp_app = mcp_server.streamable_http_app(
     streamable_http_path="/",
     json_response=True,
@@ -149,9 +149,11 @@ mcp_app = mcp_server.streamable_http_app(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # The mcp_app handles its own lifespan internally
-    yield
+    """Application lifespan manager - properly initialize MCP session manager."""
+    # The mcp_app is a Starlette app with its own lifespan requirements.
+    # We need to manually trigger its startup/shutdown.
+    async with mcp_app.router.lifespan_context(app):
+        yield
 
 
 # FastAPI app
