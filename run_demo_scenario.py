@@ -102,10 +102,17 @@ class MCPDemoClient:
     """Client for calling MCP tools via Streamable HTTP."""
 
     def __init__(self, mcp_url: str):
-        self.mcp_url = mcp_url.rstrip("/")
-        # Ensure trailing slash for MCP streamable HTTP endpoint
-        if not self.mcp_url.endswith("/"):
-            self.mcp_url += "/"
+        # Handle both standard MCP endpoint and proxy endpoint
+        # If the URL ends with /api/tools/call, derive the base MCP URL
+        if mcp_url.endswith("/api/tools/call"):
+            self.mcp_url = mcp_url.replace("/api/tools/call", "/mcp/")
+            self.proxy_url = mcp_url
+        else:
+            self.mcp_url = mcp_url.rstrip("/")
+            if not self.mcp_url.endswith("/"):
+                self.mcp_url += "/"
+            self.proxy_url = self.mcp_url.replace("/mcp/", "/api/tools/call")
+        
         self.client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
         self.request_id = 0
 
@@ -151,9 +158,9 @@ class MCPDemoClient:
         return response.json()
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Call an MCP tool."""
+        """Call an MCP tool via the proxy endpoint."""
         response = await self.client.post(
-            self.mcp_url,
+            self.proxy_url,
             json={
                 "jsonrpc": "2.0",
                 "id": self._next_id(),
@@ -288,8 +295,8 @@ def main():
     )
     parser.add_argument(
         "--mcp-url",
-        default="http://localhost:8000/mcp",
-        help="MCP server endpoint (default: http://localhost:8000/mcp)"
+        default="http://localhost:8000/api/tools/call",
+        help="MCP server endpoint (default: http://localhost:8000/api/tools/call)"
     )
     parser.add_argument(
         "--speed",
