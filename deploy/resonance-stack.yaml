@@ -46,6 +46,10 @@ Parameters:
     Type: Number
     Default: 8501
     Description: Public Streamlit port exposed through the ALB.
+  McpPort:
+    Type: Number
+    Default: 8000
+    Description: MCP server port exposed through the ALB.
   DesiredCount:
     Type: Number
     Default: 1
@@ -145,6 +149,10 @@ Resources:
           FromPort: !Ref ContainerPort
           ToPort: !Ref ContainerPort
           SourceSecurityGroupId: !Ref AlbSecurityGroup
+        - IpProtocol: tcp
+          FromPort: !Ref McpPort
+          ToPort: !Ref McpPort
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -182,6 +190,30 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
+
+  McpTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${ProjectName}-mcp-tg'
+      TargetType: ip
+      Port: !Ref McpPort
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: '200-399'
+
+  McpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref McpTargetGroup
 
   EcsCluster:
     Type: AWS::ECS::Cluster
@@ -256,6 +288,8 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
+            - ContainerPort: !Ref McpPort
+              Protocol: tcp
           Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
@@ -270,6 +304,7 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn:
       - HttpListener
+      - McpListener
     Properties:
       ServiceName: !Sub '${ProjectName}-service'
       Cluster: !Ref EcsCluster
@@ -289,6 +324,9 @@ Resources:
         - ContainerName: !Sub '${ProjectName}'
           ContainerPort: !Ref ContainerPort
           TargetGroupArn: !Ref TargetGroup
+        - ContainerName: !Sub '${ProjectName}'
+          ContainerPort: !Ref McpPort
+          TargetGroupArn: !Ref McpTargetGroup
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -469,10 +507,15 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-AlbDnsName'
   AlbUrl:
-    Description: Public URL for the Resonance live demo.
+    Description: Public URL for the Resonance live demo (Streamlit).
     Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}'
     Export:
       Name: !Sub '${AWS::StackName}-AlbUrl'
+  McpUrl:
+    Description: Public URL for the Resonance MCP server.
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}:8000'
+    Export:
+      Name: !Sub '${AWS::StackName}-McpUrl'
   EcrRepositoryUri:
     Description: ECR repository URI for the demo image.
     Value: !GetAtt EcrRepository.RepositoryUri
