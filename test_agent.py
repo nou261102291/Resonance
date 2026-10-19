@@ -49,6 +49,7 @@ def test_agent_intervention(mock_boto_client):
     assert call_args.kwargs["modelId"] == EXPECTED_MODEL_ID
     assert "system" in call_args.kwargs
     assert "toolConfig" in call_args.kwargs
+    assert call_args.kwargs["inferenceConfig"]["maxTokens"] == 512
 
 
 @patch("agent.boto3.client")

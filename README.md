@@ -2,12 +2,12 @@
 
 > **Self-hosted Alexa+ MCP Server for Ambient Wellness Interventions**
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-green.svg)](https://fastapi.tiangolo.com)
 [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-orange.svg)](https://modelcontextprotocol.io)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.64+-red.svg)](https://streamlit.io)
 [![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock-yellow.svg)](https://aws.amazon.com/bedrock/)
-[![Tests](https://img.shields.io/badge/Tests-38%20passing-brightgreen.svg)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Tests-47%20passing-brightgreen.svg)](https://pytest.org)
 
 ---
 
@@ -15,13 +15,13 @@
 
 Project Resonance is a **self-hosted MCP (Model Context Protocol) server** that orchestrates proactive wellness interventions by fusing three data streams:
 
-| Stream | Source | Purpose |
-|--------|--------|---------|
-| **Biometrics** | "Bee" Wearable | Heart rate, HRV, stress levels → `ArousalStateToken` |
-| **Environmental Context** | Ring Camera + Amazon Nova | Vision classification: `sedentary` \| `active` \| `outdoor` \| `unknown` |
-| **Actuation** | Fire TV | Play calming content, adjust ambient lighting |
+| Stream | Intended source | Current prototype |
+|--------|-----------------|--------------------|
+| **Biometrics** | "Bee" wearable | Synthetic `ArousalStateToken` from local mocks |
+| **Environmental Context** | Ring camera + Amazon Nova | Synthetic `ContextToken`; Nova classifier is implemented but not wired into the demo |
+| **Actuation** | Fire TV | Local simulated actuation; no Fire TV integration |
 
-**Core Innovation**: Zero-knowledge architecture; raw biometric data never leaves the edge. Only classified tokens (`ArousalStateToken`, `ContextToken`) flow through the MCP server to the reasoning agent.
+**Privacy-oriented design goal**: Classify sensitive sensor data at the edge and pass only `ArousalStateToken` and `ContextToken` values to the reasoning agent. The current demo uses hardcoded/mock sensor values; it does not include a real wearable, camera, or edge-classification integration, so this is an intended architecture rather than a verified privacy guarantee.
 
 ---
 
@@ -44,8 +44,8 @@ Project Resonance is a **self-hosted MCP (Model Context Protocol) server** that 
        │                   │                   │
        ▼                   ▼                   ▼
 ┌─────────────────────────────────────────────────────┐
-│           Agent Loop (Claude 3.5 Sonnet)            │
-│  • Chains tools: bee → ring → fire_tv               │
+│         Bedrock reasoning (Claude 3.7 Sonnet)        │
+│  • Can return a tool-use request; no full loop       │
 │  • False-positive prevention (exercise = no alert)  │
 │  • Outputs actuation commands                       │
 └─────────────────────────────────────────────────────┘
@@ -63,8 +63,8 @@ Project Resonance is a **self-hosted MCP (Model Context Protocol) server** that 
 
 ### Prerequisites
 
-- Python 3.11+
-- AWS Account with Bedrock access (for Phase 2+)
+- Python 3.12+
+- AWS Bedrock access is optional; the local demo uses synthetic data and mock actuation
 - `uv` or `pip` for dependency management
 
 ### Installation
@@ -87,7 +87,7 @@ pip install -r requirements.txt
 ```txt
 fastapi==0.141.1
 uvicorn==0.54.0
-mcp==1.11.0
+mcp==1.26.0
 streamlit==1.64.0
 boto3==1.43.103
 pydantic==2.13.5
@@ -123,7 +123,7 @@ streamlit run streamlit_app.py
 ```bash
 # Terminal 3 (optional - for cinematic demo)
 python run_demo_scenario.py
-# Feeds escalating panic attack data over 60 seconds
+# Runs a scripted demo against an MCP server; see --help for options
 ```
 
 ---
@@ -134,13 +134,25 @@ python run_demo_scenario.py
 # Run all tests
 pytest -v
 
-# Run specific test suites
-pytest test_mocks.py -v      # 16 tests - Pydantic schemas & mock sensors
-pytest test_mcp.py -v        # 12 tests - MCP tool handlers (unit)
-pytest test_aws.py -v        # 5 tests  - AWS Bedrock integration (mocked)
+# Run focused suites (AWS calls are mocked)
+pytest test_mcp.py test_aws.py test_agent.py test_streamlit_app.py -v
 ```
 
-**Current Status**: 38 tests passing ✅
+**Current Status**: 47 tests passing; Bedrock calls are mocked in tests. ✅
+
+## Amazon Bedrock Integration Status
+
+Bedrock code exists, but this is not a live, end-to-end AWS integration:
+
+| Path | Implementation | Current status |
+|------|----------------|----------------|
+| Claude reasoning | `agent.py` calls `bedrock-runtime` Converse using `anthropic.claude-3-7-sonnet-20250219-v1:0` and explicitly limits output to 512 tokens. | Live-capable call; tests mock AWS. When the model call is unavailable, the app can use simulated reasoning. |
+| Nova image classification | `aws_services.py` calls Converse with Nova Lite by default (`amazon.nova-lite-v1:0`), decodes base64 JPEG input to bytes, and limits output to 100 tokens. | Implemented, but not connected to the MCP tools or Streamlit demo; no live image is captured or sent. |
+| Tool execution | Claude may return a Fire TV tool-use request. | The agent function does not execute the requested tool or send a tool-result round trip. The demo simulates actuation locally; no Fire TV device is controlled. |
+
+The ordinary demo works without AWS credentials and uses synthetic sensor/context values. Live Bedrock invocation requires model access in the configured region and AWS credentials; no live invocation or AWS deployment has been verified because account access is blocked. Image inputs sent to the Nova function would leave the application for Bedrock processing, so do not send real camera images until consent, retention, privacy, and logging controls are designed and tested.
+
+See [BEDROCK_INTEGRATION.md](BEDROCK_INTEGRATION.md) for model flow, setup, permissions, fallbacks, data handling, and known gaps.
 
 ---
 
@@ -148,13 +160,13 @@ pytest test_aws.py -v        # 5 tests  - AWS Bedrock integration (mocked)
 
 ```
 resonance/
-├── models.py              # Pydantic schemas (Zero-Knowledge tokens)
+├── models.py              # Pydantic schemas for classified demo tokens
 ├── mock_sensors.py        # Mock sensor functions (Phase 1)
 ├── test_mocks.py          # Schema & mock tests (16 tests)
 ├── mcp_server.py          # FastAPI + MCP Streamable HTTP server
 ├── test_mcp.py            # MCP handler unit tests (12 tests)
-├── aws_services.py        # Bedrock Nova integration (Phase 2)
-├── test_aws.py            # AWS integration tests (5 tests)
+├── aws_services.py        # Live-capable, currently unwired Bedrock Nova classifier
+├── test_aws.py            # Bedrock request/response tests (mocked)
 ├── streamlit_app.py       # 3-column dashboard UI
 ├── run_demo_scenario.py   # Automated demo script (Phase 4)
 ├── requirements.txt       # Python dependencies
@@ -243,7 +255,7 @@ The automated demo (`run_demo_scenario.py`) simulates a 60-second panic attack p
 
 ---
 
-## 🔐 Zero-Knowledge Architecture
+## 🔐 Privacy Model (Design Target)
 
 ```
 Raw Biometrics (HR, HRV, SpO2) 
@@ -260,11 +272,7 @@ Raw Biometrics (HR, HRV, SpO2)
    ── NO raw values ──► MCP Server
 ```
 
-**Privacy Guarantees**:
-- Raw biometrics processed on-device
-- Only classified tokens transmitted
-- No PII in MCP payloads
-- Audit trail via `demo_log.json`
+The demo currently generates synthetic classified tokens and labels them in the UI. It does not process live biometric measurements or establish that raw data is handled on-device. A real deployment must keep raw biometric and image data at the edge, transmit only the classified tokens, and verify that no sensitive values enter MCP requests, logs, or telemetry. The zero-knowledge properties shown above are design requirements, not guarantees demonstrated by this prototype.
 
 ---
 
@@ -283,7 +291,7 @@ Raw Biometrics (HR, HRV, SpO2)
 4. Register in `handle_call_tool` dispatcher
 5. Add unit tests in `test_mcp.py`
 
-### Running with Real AWS (Phase 2+)
+### Optional: Running the Claude Reasoning Path with AWS
 
 ```bash
 # Configure AWS credentials
@@ -293,10 +301,12 @@ export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=us-east-1
 
-# Enable Bedrock models in AWS Console:
-# - amazon.nova-lite-v1:0 (vision)
-# - anthropic.claude-3-5-sonnet-20241022-v2:0 (reasoning)
+# Enable access to the model in the selected region:
+# - anthropic.claude-3-7-sonnet-20250219-v1:0 (reasoning)
+# - amazon.nova-lite-v1:0 (image classifier; not wired to the demo)
 ```
+
+The Claude call currently pins `us-east-1` in `agent.py`; the Nova classifier uses the boto3-configured region. The ECS task role currently grants `bedrock:Converse` and `bedrock:InvokeModel` on `"*"`. This is demo-only broad access, not a production policy. Scope permissions to required model resources and actions before deployment. See [BEDROCK_INTEGRATION.md](BEDROCK_INTEGRATION.md).
 
 ---
 
@@ -304,11 +314,12 @@ export AWS_DEFAULT_REGION=us-east-1
 
 | Track | Requirement | Status |
 |-------|-------------|--------|
-| **Primary (Alexa+)** | Self-hosted MCP Server (Streamable HTTP) | ✅ |
-| **AWS Builder** | Bedrock (Claude + Nova) integration | 🟡 Phase 2 |
-| **Open Source** | `resonance-mcp-toolkit` package | ⏳ Phase 4 |
-| **Design** | Visible agent reasoning (Streamlit) | ✅ |
-| **Impact** | Proactive cognitive load management | ✅ |
+| **Primary (Alexa+)** | Self-hosted MCP server using Streamable HTTP; server negotiates protocol `2025-11-25` | ✅ Local protocol handshake verified; separate public deployment remains pending |
+| **AWS Builder** | Demonstrable use of AWS services / Bedrock | 🟡 Bedrock invocation code exists, but AWS access is blocked, calls are unverified live, and Nova is unwired. Do not claim a live AWS deployment. |
+| **Open Source mini-challenge** | Additional open-source project/toolkit | ❌ `resonance-mcp-toolkit` has not been packaged or published |
+| **Design / impact** | Product and impact claims | Project intent only; judging outcome and submission eligibility cannot be verified from this repository |
+
+The official [AppDev 2026 rules](https://amazonappdev2026.devpost.com/rules) could not be fetched from this environment (HTTP 403). Re-check the exact track criteria, eligibility, deadlines, public-repository requirement, and video/submission deliverables on Devpost before submitting. Protocol support is now aligned to the `2025-11-25` requirement reported for Alexa+; this local check does not establish that the submission meets all other criteria.
 
 ---
 
@@ -332,7 +343,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 ## 🙏 Acknowledgments
 
 - **MCP Team** — Model Context Protocol specification
-- **AWS Bedrock** — Claude 3.5 Sonnet & Amazon Nova
+- **AWS Bedrock** — Claude 3.7 Sonnet & Amazon Nova (code paths; live use unverified)
 - **Anthropic** — Constitutional AI principles
 - **Streamlit** — Rapid dashboard prototyping
 

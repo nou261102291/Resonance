@@ -1,45 +1,41 @@
 # Project Resonance: Technical Implementation Plan (v2.0 - Strict Execution)
 
 ## 🎯 Objective
-Build a self-hosted Alexa+ MCP Server that orchestrates ambient wellness interventions by fusing biometric data (Bee), environmental context (Ring/Amazon Nova), and media actuation (Fire TV).
+Build a self-hosted Alexa+ MCP server prototype using synthetic biometric/context data, model reasoning, and simulated media actuation.
 
-## 📊 Progress Summary (as of 2026-09-29)
-| Phase | Status | Tests Passing | Key Files |
-|-------|--------|---------------|-----------|
-| **Phase 1: Foundation & Mocks** | ✅ **COMPLETE** | 16 | `models.py`, `mock_sensors.py`, `test_mocks.py` |
-| **Phase 2: AWS Integration** | ✅ **COMPLETE** | 5 | `aws_services.py`, `test_aws.py` |
-| **Phase 3: Agentic Orchestration** | 🟡 **PARTIAL** | 6 | `agent.py`, `test_agent.py` |
-| **Phase 4: Demo & Polish** | ✅ **COMPLETE** | 11 | `streamlit_app.py`, `mcp_server.py` |
+## Current Status
 
-**Total Tests Passing: 38** (16 mock + 12 MCP handler + 5 AWS + 6 agent)
+- **MCP:** `mcp==1.26.0`; local Streamable HTTP handshake verifies protocol `2025-11-25`. Public deployment remains unverified.
+- **Bedrock:** Claude 3.7 Converse request path exists; Nova Lite image classification is implemented but not wired into the demo. AWS access is blocked, so no live call has been verified.
+- **Agent loop:** Claude can return a tool-use request, but the application does not execute it and return a `toolResult` to Bedrock. Demo actuation remains local simulation.
+- **Privacy/hardware:** Sensor and context values are synthetic; no Bee, Ring, or Fire TV device integration exists. Edge privacy is a design goal, not a verified guarantee.
+- **Open-source mini-challenge:** The planned `resonance-mcp-toolkit` has not been packaged or published.
+- **Verification:** `pytest -q` passes 47 tests with MCP 1.26.0; AWS calls are mocked. CloudFormation deployment and live Bedrock access are unverified.
 
-## ✅ Completed Since Last Update
-- Added Bedrock model fallback handling for retired or unavailable model versions.
-- Hardened the Streamlit demo to fall back to simulated agent reasoning when AWS access is blocked.
-- Removed demo-time `KeyError` crashes by supporting both `arguments` and `args` payload shapes.
-- Expanded agent tests to cover model fallback, empty responses, credentials failures, and non-recoverable client errors.
-- Ran the full repository test suite and syntax compilation successfully.
+The linked Devpost rules page returned HTTP 403 in this environment. Recheck current track criteria and submission deliverables on Devpost. See [BEDROCK_INTEGRATION.md](BEDROCK_INTEGRATION.md) for Bedrock implementation boundaries, setup, IAM, and privacy notes.
+
+The plan below is retained as historical implementation context; its original dates and checklist states do not supersede the current status above.
 
 ## 🔧 Critical Fixes Applied (2026-10-02)
 
-### 1. MCP 1.x API Compatibility Fix (`mcp_server.py`)
-**Problem:** The original code used non-existent decorator APIs (`@mcp_server.list_tools()` and `@mcp_server.call_tool()`) which don't exist in MCP 1.11.0. This caused `AttributeError: 'Server' object has no attribute 'add_request_handler'` on import.
+### 1. MCP 1.x FastMCP Registration Fix (`mcp_server.py`)
+**Problem:** The server was registered using `add_request_handler()`, which is not part of the pinned MCP 1.11.0 API. The module failed during import.
 
-**Root Cause:** The code was written against an assumed API that doesn't match the actual MCP 1.x SDK. The MCP 1.x SDK uses `add_request_handler()` method with explicit request type parameters.
+**Root Cause:** MCP 1.11.0's low-level `Server` registers handlers through its `list_tools()` and `call_tool()` decorators, while `streamable_http_app()` is provided by `FastMCP`. The server mixed APIs from different MCP SDK interfaces.
 
 **Fix Applied:**
-- Replaced decorator-based handlers with `mcp_server.add_request_handler()` calls
-- Used correct request types: `ListToolsRequest` for `tools/list` and `CallToolRequest` for `tools/call`
-- Kept standalone handler functions (`handle_get_bee_state`, `handle_get_ring_context`, `handle_trigger_fire_tv`, `handle_call_tool`) for test compatibility
-- Updated `handle_call_tool` to accept both string name + dict arguments (MCP handler) and `CallToolRequestParams` object (test compatibility)
+- Use `FastMCP` for tool registration and the Streamable HTTP application.
+- Keep standalone handler functions for direct unit tests and the FastAPI proxy route.
+- Retain the dispatcher compatibility with both string tool names and `CallToolRequestParams`.
+- Exercise the standard `/mcp/` initialize, `tools/list`, and `tools/call` flow in an integration test.
 
-**Files Changed:** `mcp_server.py`
+**Files Changed:** `mcp_server.py`, `test_mcp.py`
 
 ### 2. Invalid MCP Version Pin Fix (`requirements.txt`, `pyproject.toml`)
-**Problem:** `mcp==2.2.0` was pinned but doesn't exist on PyPI. The latest stable version is 1.x.
+**Problem:** The requirements originally pinned a nonexistent MCP SDK version.
 
 **Fix Applied:**
-- Changed `mcp==2.2.0` → `mcp==1.11.0` in both `requirements.txt` and `pyproject.toml`
+- Initially corrected the pin to `mcp==1.11.0`; later upgraded to `mcp==1.26.0` to negotiate the Alexa+ protocol version.
 
 **Files Changed:** `requirements.txt`, `pyproject.toml`
 
@@ -49,14 +45,13 @@ Build a self-hosted Alexa+ MCP Server that orchestrates ambient wellness interve
 **Fix Applied:**
 - Updated `handle_call_tool` signature to accept `Union[str, CallToolRequestParams]`
 - Added runtime type detection to extract `name` and `arguments` from either format
-- All 38 tests now pass (11 MCP handler tests + 27 other tests)
+- Historical test compatibility fix; see current verification above for the current suite count.
 
-**Verification:**
-- ✅ `python -c "import mcp_server"` - imports without error
-- ✅ `pytest test_mcp.py -v` - 11/11 tests pass
-- ✅ `pytest -v` - 38/38 tests pass
-- ✅ Server starts on `http://localhost:8000` with `/mcp` endpoint accessible
-- ✅ Streamlit demo runs on `http://localhost:8501`
+**Verification (2026-10-18):**
+- ✅ MCP server imports with pinned MCP 1.26.0
+- ✅ Standard Streamable HTTP `initialize`, `tools/list`, and `tools/call` requests pass
+- ✅ `pytest -q` - 47 tests pass (AWS calls mocked)
+- ✅ Streamlit AppTest and local HTTP smoke test pass
 
 ## 🛑 The 3 Golden Rules of this Hackathon
 1. **Mock First, Integrate Later:** We will NOT wait on physical hardware or buggy SDKs. We build `mock_sensors.py` on Day 1. The MCP server only cares about the JSON payload.
@@ -64,9 +59,9 @@ Build a self-hosted Alexa+ MCP Server that orchestrates ambient wellness interve
 3. **Strict TDD via Copilot:** We write the `pytest` tests *before* the implementation. Copilot will generate the tests first, ensuring we stay exactly on track with the rubric.
 
 ## 🛠️ Core Tech Stack
-- **Language:** Python 3.11+
+- **Language:** Python 3.12+
 - **MCP Framework:** Official MCP Python SDK (Streamable HTTP)
-- **AI/Reasoning:** Amazon Bedrock (Claude 3.5 Sonnet for logic, Amazon Nova for multimodal vision)
+- **AI/Reasoning:** Bedrock Converse (Claude 3.7 reasoning request and Nova Lite classifier; live access unverified)
 - **API Framework:** FastAPI (for the MCP HTTP transport)
 - **Demo UI:** Streamlit (Continuous visual feedback)
 - **Testing:** `pytest` and `pytest-asyncio`
@@ -114,10 +109,10 @@ Build a self-hosted Alexa+ MCP Server that orchestrates ambient wellness interve
 ---
 
 ## 📅 Phase 3: Agentic Orchestration & Context Fusion (Day 4)
-**Goal:** Connect the tools to Claude 3.5 Sonnet so it can reason, chain tools, and prevent false positives.
+**Historical goal:** Connect the tools to Claude 3.7 Sonnet so it can reason, chain tools, and prevent false positives. The complete tool-execution loop remains unimplemented.
 
 ### Action Items
-1. Implement the core agent loop using Amazon Bedrock (Claude 3.5 Sonnet).
+1. Complete the core agent loop using Amazon Bedrock (Claude 3.7 Sonnet).
 2. Feed the MCP tool schemas into the Claude `system` prompt.
 3. Write the logic to parse Claude's `toolUse` responses, execute the Python function, and feed the result back.
 
@@ -149,10 +144,9 @@ Build a self-hosted Alexa+ MCP Server that orchestrates ambient wellness interve
 
 ---
 
-## 🏆 Final Hackathon Alignment Checklist
+## 🏆 Hackathon Alignment Notes
 
-- [ ] **Primary Track (Alexa+):** Is the core a self-hosted MCP server (Streamable HTTP)? *Yes.*
-- [x] **AWS Builder:** Are we using AWS services with documented integrations? *Yes, Bedrock (Claude & Nova).*
-- [ ] **Open Source:** Is there a new, additional open-source project? *Yes, the `resonance-mcp-toolkit`.*
-- [ ] **Design:** Is the interaction model intuitive? *Yes, the Streamlit UI makes the invisible agent reasoning visible.*
-- [ ] **Impact:** Does it solve a credible need? *Yes, proactive cognitive load management.*
+- **Primary Alexa+ protocol:** Local MCP handshake negotiates `2025-11-25`; public deployment and other submission criteria remain unverified.
+- **AWS Builder:** Bedrock code paths are documented, but live calls and AWS deployment are unverified; Nova is not wired into the demo.
+- **Open Source mini-challenge:** The additional `resonance-mcp-toolkit` project is not implemented or published.
+- **Eligibility, judging, and external submission deliverables:** Confirm against the current Devpost rules and submission page; they cannot be verified from this repository.

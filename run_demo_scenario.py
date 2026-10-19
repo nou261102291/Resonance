@@ -25,6 +25,8 @@ from typing import Any
 
 import httpx
 
+REQUIRED_MCP_PROTOCOL_VERSION = "2025-11-25"
+
 
 @dataclass
 class DemoStep:
@@ -212,7 +214,14 @@ async def run_demo(mcp_url: str, speed_factor: float = 1.0):
         # Initialize MCP connection
         print("🔌 Initializing MCP connection...")
         init_result = await client.initialize()
+        negotiated_version = init_result.get("result", {}).get("protocolVersion")
+        if negotiated_version != REQUIRED_MCP_PROTOCOL_VERSION:
+            raise RuntimeError(
+                f"MCP server negotiated {negotiated_version!r}; "
+                f"this demo requires {REQUIRED_MCP_PROTOCOL_VERSION!r}"
+            )
         print(f"   ✅ Initialized: {init_result.get('result', {}).get('serverInfo', {}).get('name', 'unknown')}")
+        print(f"   MCP protocol: {negotiated_version}")
 
         # List tools
         tools_result = await client.list_tools()

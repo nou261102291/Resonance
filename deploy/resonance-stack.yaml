@@ -205,13 +205,18 @@ Resources:
       Matcher:
         HttpCode: '200-399'
 
-  McpListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
+  McpListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
+      ListenerArn: !Ref HttpListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - /mcp*
+              - /api/tools/*
+      Actions:
         - Type: forward
           TargetGroupArn: !Ref McpTargetGroup
 
@@ -293,6 +298,8 @@ Resources:
           Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: MCP_ALLOWED_HOSTS
+              Value: !GetAtt ApplicationLoadBalancer.DNSName
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -304,7 +311,7 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn:
       - HttpListener
-      - McpListener
+      - McpListenerRule
     Properties:
       ServiceName: !Sub '${ProjectName}-service'
       Cluster: !Ref EcsCluster
@@ -512,10 +519,15 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-AlbUrl'
   McpUrl:
-    Description: Public URL for the Resonance MCP server.
-    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}:8000'
+    Description: Public MCP Streamable HTTP endpoint routed by the ALB.
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}/mcp'
     Export:
       Name: !Sub '${AWS::StackName}-McpUrl'
+  McpToolProxyUrl:
+    Description: Public MCP tool-call proxy endpoint routed by the ALB.
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}/api/tools/call'
+    Export:
+      Name: !Sub '${AWS::StackName}-McpToolProxyUrl'
   EcrRepositoryUri:
     Description: ECR repository URI for the demo image.
     Value: !GetAtt EcrRepository.RepositoryUri

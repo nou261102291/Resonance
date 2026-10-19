@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 import streamlit as st
 
@@ -79,6 +80,42 @@ def run_async(coro):
     return loop.run_until_complete(coro)
 
 
+def _simulated_agent_result(biometric_state: str, context_state: str) -> dict[str, Any] | str:
+    """Return the deterministic demo result when Bedrock is unavailable."""
+    if biometric_state in {"elevated", "critical"} and context_state == "sedentary":
+        return {
+            "tool": "trigger_fire_tv",
+            "arguments": {
+                "action": "play_calming_content",
+                "protocol": "alexa",
+            },
+        }
+
+    return (
+        f"Biometric state is {biometric_state} and context is {context_state}. "
+        "No intervention needed."
+    )
+
+
+def _fire_tv_arguments(result: Any) -> dict[str, str] | None:
+    """Extract a valid Fire TV request from the Bedrock tool-call response."""
+    if not isinstance(result, dict) or result.get("tool") != "trigger_fire_tv":
+        return None
+
+    arguments = result.get("arguments")
+    if not isinstance(arguments, dict):
+        raise ValueError("trigger_fire_tv tool request must include an arguments object")
+
+    action = arguments.get("action")
+    protocol = arguments.get("protocol", "alexa")
+    if not isinstance(action, str) or not action.strip():
+        raise ValueError("trigger_fire_tv tool request must include a non-empty action")
+    if not isinstance(protocol, str) or not protocol.strip():
+        raise ValueError("trigger_fire_tv protocol must be a non-empty string")
+
+    return {"action": action, "protocol": protocol}
+
+
 def run_automated_demo(col1, col2, col3):
     """Run the automated panic attack demo scenario."""
     # Step 1: Update Biometrics to 'critical'
@@ -95,12 +132,12 @@ def run_automated_demo(col1, col2, col3):
         )
         with st.expander("Full Payload", expanded=True):
             st.json({
+                "source": "synthetic_demo",
                 "state": "critical",
                 "confidence": 0.94,
-                "heart_rate": 145,
-                "hrv": 12,
                 "timestamp": time.time()
             }, expanded=False)
+        st.caption("Synthetic demo token; raw sensor measurements are not included.")
         st.caption(f"Timestamp: {time.time():.0f}")
     
     time.sleep(2)
@@ -116,24 +153,19 @@ def run_automated_demo(col1, col2, col3):
                 result = run_agent("critical", "sedentary")
             except Exception:
                 print("AWS Call blocked by account policy. Using simulated agent reasoning.")
-                result = {
-                    "reasoning": "Biometric state: critical, Context: sedentary. Triggering intervention.",
-                    "action": "tool_use",
-                    "tool": "trigger_fire_tv",
-                    "args": {"action": "play_calming_content", "protocol": "alexa"}
-                }
+                result = _simulated_agent_result("critical", "sedentary")
         
+        tool_arguments = _fire_tv_arguments(result)
         if isinstance(result, dict):
             st.success("🎯 Intervention Triggered!")
             st.json(result, expanded=False)
-            arguments = result.get("arguments", result.get("args", {}))
             with st.expander("Agent Reasoning Trace", expanded=True):
                 st.code(
                     f"""# Agent loop executed:
 # 1. get_bee_state() → critical (0.94)
 # 2. get_ring_context() → sedentary (0.89)
 # 3. Reason: "User is sedentary but biometrics show panic"
-# 4. trigger_fire_tv({arguments})
+# 4. trigger_fire_tv({tool_arguments})
                     """.strip(),
                     language="python",
                 )
@@ -150,8 +182,7 @@ def run_automated_demo(col1, col2, col3):
                 )
         
         st.divider()
-        st.caption("MCP Server: http://localhost:8000/mcp")
-        st.caption("Status: Connected ✅")
+        st.caption("MCP: Not contacted — this scenario uses local mock handlers.")
     
     time.sleep(2)
     
@@ -161,21 +192,19 @@ def run_automated_demo(col1, col2, col3):
             '<div class="column-header">3. Actuation (Fire TV)</div>',
             unsafe_allow_html=True,
         )
-        st.metric(
-            label="Last Command",
-            value="🟢 start_protocol",
-            delta="Protocol: breathing",
-        )
-        with st.expander("Full Payload", expanded=True):
-            st.json({
-                "action": "start_protocol",
-                "protocol": "breathing",
-                "target": "fire_tv",
-                "status": "executed",
-                "timestamp": time.time()
-            }, expanded=False)
-        st.divider()
-        st.success("✅ Calming intervention executed on Fire TV")
+        if tool_arguments:
+            actuation = run_async(trigger_fire_tv(**tool_arguments))
+            st.metric(
+                label="Last Command",
+                value=f"🟢 {actuation.action}",
+                delta=f"Protocol: {actuation.protocol}",
+            )
+            with st.expander("Full Payload", expanded=True):
+                st.json(actuation.model_dump(), expanded=False)
+            st.divider()
+            st.success("✅ Simulated calming intervention completed")
+        else:
+            st.info("No intervention requested.")
 
 
 def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: str):
@@ -193,10 +222,6 @@ def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: s
     
     bio_confidence = confidence_map[bio_internal]
     ctx_confidence = context_confidence_map[ctx_internal]
-    
-    # Heart rate and HRV for display
-    hr_map = {"calm": 65, "elevated": 105, "critical": 145}
-    hrv_map = {"calm": 55, "elevated": 28, "critical": 12}
     
     # ─── Column 1: Biometrics (Bee) ───
     with col1:
@@ -220,12 +245,12 @@ def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: s
         
         with st.expander("Full Payload", expanded=True):
             st.json({
+                "source": "synthetic_demo",
                 "state": bio_internal,
                 "confidence": bio_confidence,
-                "heart_rate": hr_map[bio_internal],
-                "hrv": hrv_map[bio_internal],
                 "timestamp": time.time()
             }, expanded=False)
+        st.caption("Synthetic demo token; raw sensor measurements are not included.")
         st.caption(f"Timestamp: {time.time():.0f}")
     
     # ─── Column 2: Agent Brain (MCP) ───
@@ -239,26 +264,20 @@ def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: s
                 result = run_agent(bio_internal, ctx_internal)
             except Exception:
                 print("AWS Call blocked by account policy. Using simulated agent reasoning.")
-                # Determine if intervention is needed
-                if bio_internal in {"elevated", "critical"} and ctx_internal == "sedentary":
-                    result = {
-                        "reasoning": f"Biometric state: {bio_internal}, Context: {ctx_internal}. Triggering intervention.",
-                        "action": "tool_use",
-                        "tool": "trigger_fire_tv",
-                        "args": {"action": "play_calming_content", "protocol": "alexa"}
-                    }
-                else:
-                    result = f"Biometric state is {bio_internal} and context is {ctx_internal}. No intervention needed."
+                result = _simulated_agent_result(bio_internal, ctx_internal)
         
+        tool_arguments = _fire_tv_arguments(result)
         # Generate reasoning text
         if isinstance(result, dict):
             st.success("Agent selected a tool call.", icon="🤖")
             st.json(result, expanded=False)
-            arguments = result.get("arguments", result.get("args", {}))
             
             # Generate human-readable reasoning
             if bio_internal in {"elevated", "critical"} and ctx_internal == "sedentary":
-                reasoning_text = f"High heart rate detected ({hr_map[bio_internal]} bpm), but context is {ctx_internal.capitalize()}, so intervention triggered."
+                reasoning_text = (
+                    f"Elevated arousal state with {ctx_internal} context, "
+                    "so a simulated intervention is requested."
+                )
             else:
                 reasoning_text = f"Biometric state is {bio_internal} and context is {ctx_internal}. No intervention needed."
             
@@ -266,7 +285,7 @@ def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: s
 # 1. get_bee_state() → {bio_internal} ({bio_confidence:.2f})
 # 2. get_ring_context() → {ctx_internal} ({ctx_confidence:.2f})
 # 3. Reason: {reasoning_text}
-# 4. trigger_fire_tv(action={arguments.get('action')!r}, protocol={arguments.get('protocol')!r})
+# 4. trigger_fire_tv(action={tool_arguments.get('action')!r}, protocol={tool_arguments.get('protocol')!r})
             """.strip()
             st.code(reasoning_trace, language="python")
         else:
@@ -279,8 +298,7 @@ def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: s
             st.code(reasoning_trace, language="python")
         
         st.divider()
-        st.caption("MCP Server: http://localhost:8000/mcp")
-        st.caption("Status: Connected ✅")
+        st.caption("MCP: Not contacted — this scenario uses local mock handlers.")
     
     # ─── Column 3: Actuation (Fire TV) ───
     with col3:
@@ -290,12 +308,13 @@ def run_custom_scenario(col1, col2, col3, biometric_state: str, context_state: s
         )
         
         # Determine actuation based on agent result
-        if isinstance(result, dict) and result.get("action") == "tool_use":
-            action = result.get("args", {}).get("action", "play_calming_content")
-            protocol = result.get("args", {}).get("protocol", "alexa")
-            status = "executed"
-            status_icon = "🟢"
-            st.success("✅ Calming intervention executed on Fire TV")
+        if tool_arguments:
+            actuation = run_async(trigger_fire_tv(**tool_arguments))
+            action = actuation.action
+            protocol = actuation.protocol
+            status = actuation.status
+            status_icon = "🟢" if status == "executed" else "🟡"
+            st.success("✅ Simulated calming intervention completed")
         else:
             action = "none"
             protocol = "none"
@@ -427,17 +446,12 @@ def main():
         except Exception as e:
             # Fallback for demo if AWS SCP blocks the request
             print(f"AWS Call blocked by account policy. Using simulated agent reasoning.")
-            agent_result = {
-                "reasoning": f"Biometric state: {bee_state.state}, Context: {context_state.scene}. Triggering intervention.",
-                "action": "tool_use",
-                "tool": "trigger_fire_tv",
-                "args": {"action": "play_calming_content", "protocol": "alexa"}
-            }
+            agent_result = _simulated_agent_result(bee_state.state, context_state.scene)
 
         if isinstance(agent_result, dict):
             st.success("Agent selected a tool call.", icon="🤖")
             st.json(agent_result, expanded=False)
-            arguments = agent_result.get("arguments", agent_result.get("args", {}))
+            arguments = _fire_tv_arguments(agent_result) or {}
             reasoning_trace = f"""# Agent loop executed:
 # 1. get_bee_state() → {bee_state.state} ({bee_state.confidence:.2f})
 # 2. get_ring_context() → {context_state.scene} ({context_state.confidence:.2f})
@@ -456,8 +470,7 @@ def main():
 
         # MCP Connection status
         st.divider()
-        st.caption("MCP Server: http://localhost:8000/mcp")
-        st.caption("Status: Connected ✅")
+        st.caption("MCP: Not contacted — this view uses local mock handlers.")
 
     # ─── Column 3: Actuation (Fire TV) ───
     with col3:
@@ -499,7 +512,7 @@ def main():
     st.divider()
     st.caption(
         "Project Resonance • Hackathon Demo • "
-        "Zero-Knowledge Architecture • AWS Bedrock + MCP"
+        "Synthetic Demo • Privacy Design Goal Not Verified • Bedrock + MCP"
     )
 
 

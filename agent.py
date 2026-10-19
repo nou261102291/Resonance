@@ -1,4 +1,4 @@
-"""Agent module for ambient wellness orchestration using Amazon Bedrock."""
+"""Bedrock Converse reasoning; returned tool requests are not executed here."""
 
 import boto3
 import json
@@ -64,7 +64,8 @@ def run_agent(biometric_state: str, context_state: str) -> Union[Dict[str, Any],
                 {"role": "user", "content": [{"text": user_message}]}
             ],
             system=[{"text": system_prompt}],
-            toolConfig={"tools": tools_schema}
+            toolConfig={"tools": tools_schema},
+            inferenceConfig={"maxTokens": 512},
         )
     except NoCredentialsError:
         if biometric_state in {"elevated", "critical"} and context_state == "sedentary":

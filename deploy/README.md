@@ -17,9 +17,14 @@ This repo is built as a single demo container that starts both processes:
 - `mcp_server.py` on port `8000`
 - `streamlit_app.py` on port `8501`
 
-For the public demo, the ALB targets both ports:
-- Port `8501` for the Streamlit app (user-facing entry point)
-- Port `8000` for the MCP server (judge evaluation endpoint)
+The ALB has one HTTP listener on port `80`. It routes `/mcp*` and
+`/api/tools/*` to the MCP server on container port `8000`, and all other paths
+to Streamlit on container port `8501`. This avoids defining conflicting
+listeners on the same ALB port.
+
+Both endpoints are intentionally public for the demo and use HTTP without
+authentication. Do not use this deployment configuration for sensitive or
+production workloads.
 
 ## CI/CD flow
 
@@ -36,7 +41,7 @@ For the public demo, the ALB targets both ports:
 - ECS cluster: `resonance-demo`
 - ECS service: `resonance-demo`
 - ECS task definition: `deploy/taskdef.json`
-- Application Load Balancer with target groups on ports `8501` (Streamlit) and `8000` (MCP)
+- Application Load Balancer with path-based routing to container ports `8501` (Streamlit) and `8000` (MCP)
 - CloudWatch Logs group: `/ecs/resonance-demo`
 - CodeConnections connection to the GitHub repo
 - CodeBuild project with privileged mode enabled for Docker builds
@@ -58,4 +63,6 @@ Use the CloudFormation template at [deploy/resonance-stack.yaml](resonance-stack
 - `GitHubFullRepositoryId`
 - `GitHubBranchName`
 
-After the stack reaches `CREATE_COMPLETE`, check the `AlbUrl` output in CloudFormation to open the live Streamlit demo, and the `McpUrl` output for the MCP server endpoint.
+After the stack reaches `CREATE_COMPLETE`, use `AlbUrl` to open the live
+Streamlit demo, `McpUrl` for the MCP endpoint, and `McpToolProxyUrl` for the
+direct tool-call proxy workaround.

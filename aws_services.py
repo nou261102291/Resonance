@@ -1,8 +1,10 @@
-"""AWS Bedrock integration for Project Resonance - Phase 2."""
+"""Live-capable Amazon Nova scene classification; demo tools still use mocks."""
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 from typing import Any
@@ -49,7 +51,7 @@ async def analyze_image_context(
     Analyze an image using Amazon Nova multimodal model to classify environmental context.
 
     Args:
-        image_base64: Base64-encoded image data
+        image_base64: Raw base64-encoded image bytes (not a data URL).
         model_id: Bedrock model ID to use (default: amazon.nova-lite-v1:0)
 
     Returns:
@@ -59,6 +61,11 @@ async def analyze_image_context(
         ValueError: If the model response cannot be parsed
         BotoCoreError: If there's an issue with the Bedrock API call
     """
+    try:
+        image_bytes = base64.b64decode(image_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("image_base64 must contain valid base64-encoded image bytes") from exc
+
     # Initialize Bedrock client
     bedrock_client = boto3.client("bedrock-runtime")
 
@@ -87,7 +94,7 @@ Return ONLY a valid JSON object with this exact schema:
                 {
                     "image": {
                         "format": "jpeg",
-                        "source": {"bytes": image_base64}
+                        "source": {"bytes": image_bytes}
                     }
                 }
             ]

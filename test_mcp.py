@@ -126,7 +126,7 @@ class TestHandleTriggerFireTV:
             status="executed",
         )
 
-        with patch("mcp_server.trigger_panic_attack_actuation", new_callable=AsyncMock) as mock_sensor:
+        with patch("mcp_server.trigger_fire_tv", new_callable=AsyncMock) as mock_sensor:
             mock_sensor.return_value = mock_token
 
             result = await handle_trigger_fire_tv({"action": "play_calming_content", "protocol": "alexa"})
@@ -153,7 +153,7 @@ class TestHandleTriggerFireTV:
             status="executed",
         )
 
-        with patch("mcp_server.trigger_panic_attack_actuation", new_callable=AsyncMock) as mock_sensor:
+        with patch("mcp_server.trigger_fire_tv", new_callable=AsyncMock) as mock_sensor:
             mock_sensor.return_value = mock_token
 
             # Call with no arguments
@@ -174,7 +174,7 @@ class TestHandleTriggerFireTV:
             status="executed",
         )
 
-        with patch("mcp_server.trigger_panic_attack_actuation", new_callable=AsyncMock) as mock_sensor:
+        with patch("mcp_server.trigger_fire_tv", new_callable=AsyncMock) as mock_sensor:
             mock_sensor.return_value = mock_token
 
             result = await handle_trigger_fire_tv({"action": "pause_content"})
@@ -228,7 +228,7 @@ class TestHandleCallToolDispatcher:
 
         mock_token = ActuationCommand(action="play_calming_content", protocol="alexa", status="executed")
 
-        with patch("mcp_server.trigger_panic_attack_actuation", new_callable=AsyncMock) as mock_sensor:
+        with patch("mcp_server.trigger_fire_tv", new_callable=AsyncMock) as mock_sensor:
             mock_sensor.return_value = mock_token
 
             params = CallToolRequestParams(
@@ -250,3 +250,56 @@ class TestHandleCallToolDispatcher:
 
         with pytest.raises(ValueError, match="Unknown tool: unknown_tool"):
             await handle_call_tool(params)
+
+
+def test_streamable_http_serves_standard_mcp_requests():
+    from fastapi.testclient import TestClient
+
+    from mcp_server import app
+
+    headers = {
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+    }
+    with TestClient(app) as client:
+        initialized = client.post(
+            "/mcp/",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "resonance-test", "version": "1.0"},
+                },
+            },
+        )
+        tools = client.post(
+            "/mcp/",
+            headers=headers,
+            json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        called = client.post(
+            "/mcp/",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "get_bee_state", "arguments": {}},
+            },
+        )
+
+    assert initialized.status_code == 200
+    assert initialized.json()["result"]["serverInfo"]["name"] == "resonance-mcp"
+    assert initialized.json()["result"]["protocolVersion"] == "2025-11-25"
+    assert tools.status_code == 200
+    assert {tool["name"] for tool in tools.json()["result"]["tools"]} == {
+        "get_bee_state",
+        "get_ring_context",
+        "trigger_fire_tv",
+    }
+    assert called.status_code == 200
+    assert called.json()["result"]["structuredContent"]["state"] == "critical"

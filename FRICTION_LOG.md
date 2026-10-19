@@ -11,20 +11,20 @@
 **Expected**: Server starts and registers MCP tools  
 **Actual**: `AttributeError: 'Server' object has no attribute 'add_request_handler'` on import  
 **Severity**: 🔴 Critical (blocks all local development and testing)  
-**Root Cause**: Code written against assumed decorator API (`@mcp_server.list_tools()`, `@mcp_server.call_tool()`) that doesn't exist in MCP 1.11.0. The actual SDK uses `add_request_handler(method, request_type, handler)`.
+**Root Cause**: The implementation mixed MCP SDK interfaces: `add_request_handler()` is not available on the pinned MCP 1.11.0 `Server`, and its `streamable_http_app()` method belongs to `FastMCP`.
 
 **Steps Taken**:
 1. Tried `python -c "import mcp_server"` → failed
-2. Inspected MCP 1.11.0 SDK: `dir(Server)` shows `add_request_handler` but no decorators
-3. Tested `add_request_handler` with correct signatures: `ListToolsRequest` for `tools/list`, `CallToolRequest` for `tools/call`
-4. Rewrote `mcp_server.py` to use `add_request_handler()` with proper request types
-5. Kept standalone handler functions for test compatibility
+2. Inspected the installed MCP 1.11.0 API and confirmed `Server` exposes `list_tools()` and `call_tool()` decorators, while `FastMCP` owns `streamable_http_app()`
+3. Registered the tools on `FastMCP` and mounted its Streamable HTTP app under `/mcp`
+4. Kept standalone handler functions for direct tests and the FastAPI proxy route
+5. Added an integration test for standard `initialize`, `tools/list`, and `tools/call` requests
 
-**Workaround**: Used `add_request_handler("tools/list", ListToolsRequest, handler)` and `add_request_handler("tools/call", CallToolRequest, handler)` instead of decorators.
+**Workaround**: The direct FastAPI proxy remains available, but the standard MCP endpoint now works as well.
 
-**Actionable Suggestion**: MCP SDK documentation should clearly show the 1.x handler registration pattern. The decorator API appears to be from a different version or planned feature.
+**Actionable Suggestion**: Keep MCP SDK object selection and transport setup aligned to the pinned release API.
 
-**Resolution**: ✅ Fixed in `mcp_server.py` — all 38 tests pass, server imports and runs.
+**Resolution (2026-10-18)**: ✅ Fixed using `FastMCP`; standard Streamable HTTP handshake and tool calls pass, and the full test suite passes.
 
 ---
 
@@ -95,7 +95,7 @@
 - Hackathon should clarify: "self-hosted MCP server" means separate deployment, not same origin as frontend
 - Provide reference architecture for MCP + Streamlit on AWS
 
-**Resolution**: ⏳ Pending — need to deploy MCP server to `deploy/` ECS/Fargate stack and update Streamlit config.
+**Resolution (2026-10-19)**: 🟡 Local MCP is now served correctly at `/mcp/` and verified with MCP protocol requests. The public Streamlit Cloud deployment still does not host MCP; deploying the separate AWS service remains pending because AWS access is blocked.
 
 ---
 
@@ -117,14 +117,14 @@
 
 **Actionable Suggestion**: Create the automation script before submission for smooth video recording.
 
-**Resolution**: ⏳ Pending — will create now.
+**Resolution (2026-10-19)**: ✅ `run_demo_scenario.py` exists and uses the `/api/tools/call` proxy with a `--dry-run` option.
 
 ---
 
 ## Entry 6: AWS Bedrock Model Access Blocked by SCP
 
 **Date**: 2026-09-29 (from Implementation Guide)  
-**Task**: Call Amazon Nova (vision) and Claude 3.5 Sonnet (reasoning) via Bedrock  
+**Task**: Call Amazon Nova (vision) and Claude 3.7 Sonnet (reasoning) via Bedrock
 **Expected**: Real AWS responses  
 **Actual**: `AccessDeniedException` or model not found errors  
 **Severity**: 🟡 Medium (demo falls back to simulated reasoning)  
@@ -162,7 +162,7 @@
 
 **Actionable Suggestion**: Add integration test for full MCP handshake flow.
 
-**Resolution**: ⏳ Could add test, but not blocking.
+**Resolution (2026-10-19)**: 🟡 An integration test now exercises `initialize`, `tools/list`, and `tools/call` through `/mcp/`. `ping` is still handled by the SDK and is not asserted directly.
 
 ---
 
@@ -183,26 +183,24 @@
 
 **Actionable Suggestion**: Use `st.secrets` or environment variable for MCP endpoint URL.
 
-**Resolution**: ⏳ Pending — will fix in `streamlit_app.py`.
+**Resolution (2026-10-18)**: ✅ The UI now explicitly reports that it is using local mock handlers and has not contacted MCP; it no longer displays a hardcoded localhost endpoint or a false connected status.
 
 ---
 
-## Summary
+## Summary (Entries 1–8)
 
 | Entry | Severity | Status |
 |-------|----------|--------|
 | 1. MCP API Mismatch | 🔴 Critical | ✅ Fixed |
 | 2. Invalid Version Pin | 🔴 Critical | ✅ Fixed |
 | 3. Test Compatibility | 🟡 High | ✅ Fixed |
-| 4. Streamlit MCP Endpoint | 🔴 Critical | ⏳ Pending (deploy separately) |
-| 5. Missing Demo Script | 🟡 Medium | ⏳ Pending (creating now) |
+| 4. Streamlit MCP Endpoint | 🔴 Critical | 🟡 Local route fixed; public AWS deployment pending |
+| 5. Missing Demo Script | 🟡 Medium | ✅ Fixed |
 | 6. Bedrock SCP Block | 🟡 Medium | ✅ Mitigated |
-| 7. MCP Handshake Tests | 🟢 Low | ⏳ Optional |
-| 8. Hardcoded Localhost | 🟡 Medium | ⏳ Pending |
+| 7. MCP Handshake Tests | 🟢 Low | 🟡 Initialize/list/call tested; ping not asserted |
+| 8. Hardcoded Localhost | 🟡 Medium | ✅ Fixed; UI now reports local mocks are not contacting MCP |
 
-**Total Critical**: 3 (2 fixed, 1 pending deployment)  
-**Total High/Medium**: 4 (2 fixed, 2 pending)  
-**Total Low**: 1 (optional)
+The only remaining blocker in these entries is the external AWS deployment, which cannot be validated or completed without AWS access.
 
 ---
 
@@ -213,7 +211,7 @@
 **Expected**: JSON-RPC responses with tool results  
 **Actual**: `-32602: Invalid request parameters` error on all `tools/call` requests; handler never executes  
 **Severity**: 🔴 Critical (blocks all external MCP client integrations)  
-**Root Cause**: Structural mismatch between standard JSON-RPC 2.0 flat payload format and MCP 1.11.0 SDK's internal Pydantic validation schema. The SDK expects a nested `params.params` structure, but standard clients send flat `params` with `name` and `arguments` directly.
+**Root Cause**: The initial server wiring did not correctly use the pinned MCP SDK's `FastMCP` Streamable HTTP setup. The failure was initially attributed to an SDK payload-validation mismatch; the later standard-protocol smoke test showed that ordinary flat `tools/call` parameters work once the server is registered correctly.
 
 **Steps Taken**:
 1. Verified handler logic works perfectly when invoked directly (bypassing HTTP)
@@ -228,9 +226,9 @@
 - Invokes internal `handle_call_tool()` handler directly
 - Returns compliant JSON-RPC response envelope
 
-**Actionable Suggestion**: MCP SDK should either accept flat payloads or document the required nested structure clearly. Consider adding a `strict_validation` flag to disable strict schema checking for HTTP transport.
+**Actionable Suggestion**: Verify the SDK's supported server and transport APIs before attributing request failures to protocol validation.
 
-**Resolution**: ✅ Fixed via `/api/tools/call` proxy endpoint — all three tools fully operational.
+**Resolution (2026-10-19)**: ✅ The standard `/mcp/` endpoint passes `initialize`, `tools/list`, and `tools/call` with MCP 1.11.0. The proxy remains available for compatibility.
 
 ---
 
@@ -241,7 +239,7 @@
 **Expected**: Functional `tools/call` endpoint accessible to judges and external clients  
 **Actual**: Standard `/mcp` endpoint fails validation; needed alternative access path  
 **Severity**: 🔴 Critical (blocks judge evaluation)  
-**Root Cause**: MCP SDK's HTTP transport layer has structural validation mismatch that cannot be fixed without SDK changes.
+**Root Cause**: The proxy was added as a workaround before the MCP server was wired through the supported `FastMCP` interface. The earlier SDK-validation diagnosis was not confirmed.
 
 **Steps Taken**:
 1. Added FastAPI route `/api/tools/call` in `mcp_server.py`
@@ -251,11 +249,11 @@
 4. Returns compliant JSON-RPC response envelope with `result.content`
 5. Verified all three tools work: `get_bee_state`, `get_ring_context`, `trigger_fire_tv`
 
-**Workaround**: Native FastAPI route bypasses MCP framework's HTTP validation layer entirely.
+**Workaround**: The FastAPI route remains available for the demo script, but bypassing the MCP transport is not required for standard MCP clients.
 
-**Actionable Suggestion**: MCP SDK should provide a "raw" or "passthrough" mode for HTTP transport that skips strict schema validation.
+**Actionable Suggestion**: Keep the proxy documented as a compatibility endpoint, not as a replacement for MCP Streamable HTTP.
 
-**Resolution**: ✅ Implemented `/api/tools/call` — all three tools fully operational, 38 tests pass.
+**Resolution (2026-10-19)**: ✅ The direct `/api/tools/call` route remains for compatibility; standard MCP clients can use `/mcp/`.
 
 ---
 
@@ -280,25 +278,128 @@
 
 ---
 
-## Summary
+## Entry 12: Duplicate ALB Listener Port
+
+**Date**: 2026-10-19  
+**Task**: Make the Streamlit and MCP services reachable through one Application Load Balancer  
+**Expected**: Both demo surfaces route through the public ALB  
+**Actual**: The template defined two HTTP listeners on port 80 for one ALB, which is not a valid listener configuration.  
+**Severity**: 🔴 Critical for deployment  
+**Root Cause**: The two target groups were assigned separate listeners rather than path-based routing from one listener.
+
+**Fix Applied**:
+1. Kept one HTTP listener on port 80.
+2. Added a listener rule routing `/mcp*` and `/api/tools/*` to the MCP target group.
+3. Kept all other paths routed to Streamlit and updated the MCP URL outputs.
+4. Documented that the endpoints are public and unauthenticated over HTTP.
+
+**Resolution**: 🟡 Template corrected, but AWS deployment/CloudFormation validation remains unverified because AWS access is blocked. Do not use this public HTTP configuration for sensitive or production workloads.
+
+---
+
+## Entry 13: Synthetic Data and Privacy Claims
+
+**Date**: 2026-10-19  
+**Task**: Keep demo payloads consistent with the privacy-oriented design description  
+**Expected**: The demo makes clear that its sensor data is synthetic and does not imply verified edge privacy  
+**Actual**: Some UI payloads displayed raw-looking heart-rate/HRV values while the README described zero-knowledge properties as guarantees.  
+**Severity**: 🟡 Medium (could mislead judges about the prototype's capabilities)  
+**Fix Applied**:
+1. Removed raw-looking heart-rate/HRV fields from the scenario payloads.
+2. Labeled scenario data as synthetic.
+3. Reworded the README to describe edge privacy as a design target, not a verified guarantee.
+
+**Resolved Caveat**: The Streamlit footer now says the demo is synthetic and that privacy design goals are unverified.
+
+**Resolution**: 🟡 Core payload and README claims corrected; footer wording remains to be updated.
+
+---
+
+## Entry 14: Flaky Auto-Generated Timestamp Assertion
+
+**Date**: 2026-10-19  
+**Task**: Stabilize the test for the default biometric timestamp  
+**Expected**: The generated timestamp falls between the test's before/after clock reads  
+**Actual**: A test failed intermittently because timestamp conversion precision could put the generated value a fraction of a microsecond outside the strict bounds.  
+**Severity**: 🟢 Low (test flake)  
+**Fix Applied**: Added a small tolerance to the timestamp bounds assertion.
+
+**Resolution**: ✅ The full test suite passes with the tolerant assertion.
+
+---
+
+## Entry 15: Agent Tool-Call Shape and Mock Actuation
+
+**Date**: 2026-10-19  
+**Task**: Keep Bedrock and offline demo results consistent through the UI actuation step  
+**Expected**: The UI recognizes the `tool`/`arguments` result and only simulates actuation for a valid Fire TV tool request  
+**Actual**: The offline fallback used a different `action`/`args` result shape, and the UI did not consistently use the requested action/protocol.  
+**Severity**: 🟡 Medium (demo behavior differed between fallback and model response paths)  
+**Fix Applied**:
+1. Standardized fallback responses on `tool`/`arguments`.
+2. Added validation before accepting Fire TV tool arguments.
+3. Routed the requested action and protocol to the local mock handler.
+4. Added focused tests for valid, invalid, and no-intervention results.
+
+**Resolution**: ✅ Both paths now use the same shape; the demo reports simulated actuation rather than implying a real Fire TV command.
+
+---
+
+## Entry 16: Alexa+ MCP Protocol Version
+
+**Task**: Align the server's negotiated protocol with the Alexa+ protocol requirement  
+**Expected**: The self-hosted Streamable HTTP server negotiates protocol `2025-11-25`  
+**Actual**: MCP SDK 1.11.0 responded with `2025-06-18` even when the client requested `2025-11-25`.  
+**Severity**: 🔴 Critical for Alexa+ compatibility  
+**Fix Applied**:
+1. Upgraded the `mcp` dependency to `1.26.0`.
+2. Kept DNS-rebinding protection enabled and explicitly allowed local/test hosts plus the configured deployment host.
+3. Passed the ALB DNS name through `MCP_ALLOWED_HOSTS`.
+4. Updated the protocol integration test and demo client to require protocol `2025-11-25`.
+
+**Resolution**: ✅ Local handshake and tests pass. The AWS deployment remains unverified.
+
+---
+
+## Entry 17: Bedrock Input Contract and Integration Claims
+
+**Task**: Ensure Bedrock documentation describes implemented, mocked, and unwired paths accurately  
+**Expected**: Valid image bytes in Converse requests, bounded model output, and no claim that mocked tests prove live AWS integration  
+**Actual**: The Nova classifier passed a base64 string where the SDK expects image bytes; Bedrock model paths and demo wiring were not clearly distinguished in project documentation.  
+**Severity**: 🟡 Medium (live classifier would reject the request; documentation overstated readiness)  
+**Fix Applied**:
+1. Decode and validate base64 image data before creating the Converse request.
+2. Set Claude's `maxTokens` explicitly and verify it in tests.
+3. Add focused tests for the decoded image payload and malformed base64.
+4. Add `BEDROCK_INTEGRATION.md` and update the README and implementation status with IAM, privacy, fallback, and live-verification caveats.
+
+**Resolution**: ✅ Request shape is covered by mocked tests; actual AWS invocation remains unverified.
+
+---
+
+## Summary (All Entries)
 
 | Entry | Severity | Status |
 |-------|----------|--------|
 | 1. MCP API Mismatch | 🔴 Critical | ✅ Fixed |
 | 2. Invalid Version Pin | 🔴 Critical | ✅ Fixed |
 | 3. Test Compatibility | 🟡 High | ✅ Fixed |
-| 4. Streamlit MCP Endpoint | 🔴 Critical | ⏳ Pending (deploy separately) |
+| 4. Streamlit MCP Endpoint | 🔴 Critical | 🟡 Local route fixed; public AWS deployment pending |
 | 5. Missing Demo Script | 🟡 Medium | ✅ Fixed & Hardened |
 | 6. Bedrock SCP Block | 🟡 Medium | ✅ Mitigated |
-| 7. MCP Handshake Tests | 🟢 Low | ⏳ Optional |
-| 8. Hardcoded Localhost | 🟡 Medium | ⏳ Pending |
-| 9. MCP Transport Validation Mismatch | 🔴 Critical | ✅ Fixed (via proxy) |
-| 10. FastAPI Proxy Route Implementation | 🔴 Critical | ✅ Fixed |
+| 7. MCP Handshake Tests | 🟢 Low | 🟡 Initialize/list/call tested; ping not asserted |
+| 8. Hardcoded Localhost | 🟡 Medium | ✅ Fixed; UI states it is using local mocks |
+| 9. MCP Transport Validation Mismatch | 🔴 Critical | ✅ Resolved by FastMCP wiring; proxy retained |
+| 10. FastAPI Proxy Route Implementation | 🔴 Critical | ✅ Retained as compatibility endpoint |
 | 11. Demo Script Production Hardening | 🟡 Medium | ✅ Fixed |
+| 12. Duplicate ALB Listener Port | 🔴 Critical | 🟡 Template corrected; AWS deployment unverified |
+| 13. Synthetic Data and Privacy Claims | 🟡 Medium | ✅ README, payload, and footer aligned |
+| 14. Timestamp Test Flake | 🟢 Low | ✅ Fixed |
+| 15. Agent Tool-Call Shape | 🟡 Medium | ✅ Fixed |
+| 16. Alexa+ MCP Protocol Version | 🔴 Critical | ✅ Upgraded and verified locally; AWS deployment pending |
+| 17. Bedrock Input Contract and Integration Claims | 🟡 Medium | ✅ Request fixed and status documented; live access unverified |
 
-**Total Critical**: 3 (3 fixed via proxy workaround)  
-**Total High/Medium**: 4 (3 fixed, 1 pending)  
-**Total Low**: 1 (optional)
+**Current verification**: `pytest -q` passes all 47 tests with MCP 1.26.0 (one dependency warning). The standard MCP HTTP handshake/tool call negotiates `2025-11-25`. Bedrock calls are mocked in tests; AWS deployment, live model access, and CloudFormation validation remain unverified.
 
 ---
 

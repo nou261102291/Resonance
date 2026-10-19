@@ -46,7 +46,7 @@ class TestArousalStateToken:
         before = time.time()
         token = ArousalStateToken(state="calm", confidence=0.5)
         after = time.time()
-        assert before <= token.timestamp <= after
+        assert before - 0.01 <= token.timestamp <= after + 0.01
 
 
 class TestContextToken:

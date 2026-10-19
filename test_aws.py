@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from models import ContextToken
+
+FAKE_IMAGE_BASE64 = base64.b64encode(b"fake-jpeg").decode("ascii")
 
 
 class TestAnalyzeImageContext:
@@ -38,7 +41,7 @@ class TestAnalyzeImageContext:
             mock_bedrock.converse.return_value = mock_response
             mock_boto_client.return_value = mock_bedrock
 
-            result = await analyze_image_context("fake_base64_string")
+            result = await analyze_image_context(FAKE_IMAGE_BASE64)
 
             # Verify result
             assert isinstance(result, ContextToken)
@@ -57,6 +60,10 @@ class TestAnalyzeImageContext:
             ]
             assert "messages" in call_args.kwargs
             assert "inferenceConfig" in call_args.kwargs
+            assert (
+                call_args.kwargs["messages"][0]["content"][1]["image"]["source"]["bytes"]
+                == b"fake-jpeg"
+            )
 
     @pytest.mark.asyncio
     async def test_analyze_image_context_handles_all_scenes(self):
@@ -77,7 +84,7 @@ class TestAnalyzeImageContext:
                 mock_bedrock.converse.return_value = mock_response
                 mock_boto_client.return_value = mock_bedrock
 
-                result = await analyze_image_context("fake_base64_string")
+                result = await analyze_image_context(FAKE_IMAGE_BASE64)
 
                 assert isinstance(result, ContextToken)
                 assert result.scene == scene
@@ -102,7 +109,7 @@ class TestAnalyzeImageContext:
             mock_boto_client.return_value = mock_bedrock
 
             with pytest.raises((json.JSONDecodeError, ValueError)):
-                await analyze_image_context("fake_base64_string")
+                await analyze_image_context(FAKE_IMAGE_BASE64)
 
     @pytest.mark.asyncio
     async def test_analyze_image_context_raises_on_bedrock_error(self):
@@ -115,7 +122,14 @@ class TestAnalyzeImageContext:
             mock_boto_client.return_value = mock_bedrock
 
             with pytest.raises(Exception, match="Bedrock API Error"):
-                await analyze_image_context("fake_base64_string")
+                await analyze_image_context(FAKE_IMAGE_BASE64)
+
+    @pytest.mark.asyncio
+    async def test_analyze_image_context_rejects_invalid_base64(self):
+        from aws_services import analyze_image_context
+
+        with pytest.raises(ValueError, match="valid base64"):
+            await analyze_image_context("not base64!")
 
 
 class TestBedrockClientInitialization:
@@ -140,6 +154,6 @@ class TestBedrockClientInitialization:
 
             import asyncio
 
-            asyncio.run(analyze_image_context("fake_base64_string"))
+            asyncio.run(analyze_image_context(FAKE_IMAGE_BASE64))
 
             mock_boto_client.assert_called_once_with("bedrock-runtime")

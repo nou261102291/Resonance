@@ -1,32 +1,24 @@
 """FastAPI + MCP Streamable HTTP Server for Project Resonance."""
 
-from __future__ import annotations
-
 import logging
+import os
 import traceback
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
-from mcp.server import Server
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import (
-    CallToolRequest,
     CallToolRequestParams,
     CallToolResult,
-    ListToolsRequest,
-    ListToolsResult,
-    Tool,
     TextContent,
 )
 
-from models import ArousalStateToken, ContextToken, ActuationCommand
 from mock_sensors import (
-    get_bee_state,
-    get_ring_context,
     trigger_fire_tv,
     get_panic_attack_bee_state,
     get_panic_attack_ring_context,
-    trigger_panic_attack_actuation,
 )
 
 # Configure logging to see actual errors
@@ -34,45 +26,21 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-# MCP Server instance
-mcp_server = Server("resonance-mcp")
+# Allow only loopback/test hosts by default; deployments must add their public host.
+allowed_mcp_hosts = ["localhost:*", "127.0.0.1:*", "testserver"]
+allowed_mcp_hosts.extend(
+    host.strip()
+    for host in os.getenv("MCP_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+)
 
-
-# Tool definitions
-TOOLS = [
-    Tool(
-        name="get_bee_state",
-        description="Get current biometric arousal state from Bee wearable",
-        inputSchema={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": True,
-            "required": [],
-        },
-    ),
-    Tool(
-        name="get_ring_context",
-        description="Get environmental context from Ring camera + Nova vision",
-        inputSchema={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": True,
-            "required": [],
-        },
-    ),
-    Tool(
-        name="trigger_fire_tv",
-        description="Trigger Fire TV actuation (play calming content, etc.)",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "description": "Action to perform"},
-                "protocol": {"type": "string", "description": "Protocol to use (default: alexa)"},
-            },
-            "required": ["action"],
-        },
-    ),
-]
+mcp_server = FastMCP(
+    "resonance-mcp",
+    streamable_http_path="/",
+    json_response=True,
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(allowed_hosts=allowed_mcp_hosts),
+)
 
 
 # Standalone handler functions for test compatibility
@@ -97,7 +65,7 @@ async def handle_trigger_fire_tv(arguments: dict[str, Any] | None = None) -> Cal
     args = arguments or {}
     action = args.get("action", "play_calming_content")
     protocol = args.get("protocol", "alexa")
-    result = await trigger_panic_attack_actuation()
+    result = await trigger_fire_tv(action, protocol)
     return CallToolResult(
         content=[TextContent(type="text", text=result.model_dump_json())]
     )
@@ -138,36 +106,26 @@ async def handle_call_tool(name: str | CallToolRequestParams, arguments: dict[st
         raise
 
 
-# MCP request handlers using MCP 1.x add_request_handler API
-async def handle_list_tools(ctx, params: ListToolsRequest) -> ListToolsResult:
-    """Handle tools/list request."""
-    return ListToolsResult(tools=TOOLS)
+@mcp_server.tool(name="get_bee_state", description="Get current biometric arousal state from Bee wearable")
+async def mcp_get_bee_state() -> dict[str, Any]:
+    result = await get_panic_attack_bee_state()
+    return result.model_dump()
 
 
-async def handle_call_tool_request(ctx, params: CallToolRequest) -> CallToolResult:
-    """Handle tools/call request."""
-    # params is a CallToolRequest with method and params fields
-    # params.params is a CallToolRequestParams with name and arguments
-    try:
-        return await handle_call_tool(params.params.name, params.params.arguments)
-    except Exception as e:
-        # Log the full traceback before MCP framework swallows it
-        logger.error(f"Error in handle_call_tool_request: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise
+@mcp_server.tool(name="get_ring_context", description="Get environmental context from Ring camera + Nova vision")
+async def mcp_get_ring_context() -> dict[str, Any]:
+    result = await get_panic_attack_ring_context()
+    return result.model_dump()
 
 
-# Register request handlers
-mcp_server.add_request_handler("tools/list", ListToolsRequest, handle_list_tools)
-mcp_server.add_request_handler("tools/call", CallToolRequest, handle_call_tool_request)
+@mcp_server.tool(name="trigger_fire_tv", description="Trigger Fire TV actuation (play calming content, etc.)")
+async def mcp_trigger_fire_tv(action: str, protocol: str = "alexa") -> dict[str, Any]:
+    result = await trigger_fire_tv(action, protocol)
+    return result.model_dump()
 
 
 # Create the MCP Streamable HTTP app (Starlette)
-mcp_app = mcp_server.streamable_http_app(
-    streamable_http_path="/",
-    json_response=True,
-    stateless_http=True,
-)
+mcp_app = mcp_server.streamable_http_app()
 
 
 @asynccontextmanager
